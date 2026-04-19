@@ -37,7 +37,7 @@ class CounterController {
     }
   }
 
-  Future<void> _saveData() async {
+  Future<void> _saveData(String username) async {
     if (_currentUser == null) return; 
     
     final prefs = await SharedPreferences.getInstance();
@@ -63,30 +63,30 @@ class CounterController {
     }
   }
 
-  void increment() {
+  void increment(String username) {
     _counter += _step;
     _addHistory("Nilai ditambah sebesar $_step", Colors.green);
-    _saveData();
+    _saveData(username);
   }
 
-  void decrement() {
+  void decrement(String username) {
     if (_counter >= _step) {
       _counter -= _step;
       _addHistory("Nilai dikurang sebesar $_step", Colors.red);
-      _saveData(); 
+      _saveData(username);
     } else if (_counter == 0) {
       _addHistory("Nilai sudah di 0", Colors.red);
-      _saveData(); 
-    } else if (_counter < _step) {
+        _saveData(username); 
+      } else if (_counter < _step) {
       _addHistory("Nilai terlalu kecil, tidak bisa dikurang", Colors.red);
-      _saveData(); 
+      _saveData(username); 
     }
   }
 
-  void reset() {
+  void reset(String username) {
     _counter = 0;
     _addHistory("Nilai direset", Colors.red);
-    _saveData(); 
+    _saveData(username); 
   }
 
   void _addHistory(String action, Color color) {

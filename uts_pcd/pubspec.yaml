@@ -31,18 +31,25 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # flutter_dotenv: ^6.0.0   # or latest version
+  flutter_dotenv: ^6.0.0   # or latest version
   mongo_dart: 0.10.0
   mongo_dart_query: 5.0.3
   intl: ^0.20.2
   image_picker: ^1.0.7
   image: ^4.1.7
+  connectivity_plus: ^7.0.0
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  uuid: ^4.0.0 # Untuk generate ID unik
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.2.2
   path_provider: ^2.1.5
+  flutter_markdown: ^0.7.7+1
+  markdown: ^7.3.0
+
 
 dev_dependencies:
   flutter_test:
@@ -71,6 +78,7 @@ flutter:
   assets:
     - lib/assets/image/
     - lib/assets/gif/
+    - .env
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

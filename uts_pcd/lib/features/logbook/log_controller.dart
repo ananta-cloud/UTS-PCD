@@ -1,188 +1,232 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:mongo_dart/mongo_dart.dart' show ObjectId, where;
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-// Hapus import mongo_dart dan mongo_service
 import '../models/log_model.dart';
+import '../../services/mongo_service.dart';
+import '../../services/access_control_services.dart';
 import '../../helpers/log_helper.dart';
 
 class LogController {
-  // Notifier utama untuk data asli
   final ValueNotifier<List<LogModel>> logsNotifier =
       ValueNotifier<List<LogModel>>([]);
-
-  // Notifier untuk pencarian agar tidak null
   final ValueNotifier<List<LogModel>> filteredLogsNotifier =
       ValueNotifier<List<LogModel>>([]);
+  final ValueNotifier<bool> isSyncingNotifier = ValueNotifier<bool>(false);
+  // HiveBox
+  final Box<LogModel> _logBox = Hive.box<LogModel>('offline_logs');
 
+  String currentUserId = "";
+  String currentTeamId = "";
+  String userRole = "";
   String lastQuery = "";
 
-  // Kunci storage untuk SharedPreferences
-  static const String _storageKey = 'user_logs_data';
-
-  List<LogModel> get logs => logsNotifier.value;
-
   LogController() {
-    // Setiap kali logsNotifier berubah, filter otomatis dijalankan
-    logsNotifier.addListener(() {
-      _applyFilter();
+    Connectivity().onConnectivityChanged.listen((
+      List<ConnectivityResult> results,
+    ) {
+      bool isOffline =
+          results.isEmpty ||
+          results.every((result) => result == ConnectivityResult.none);
+
+      if (isOffline) {
+        MongoService().isOnline.value = false;
+        debugPrint("KONEKSI TERPUTUS: Masuk ke Mode Offline");
+      } else {
+        _handleAutoReconnect();
+      }
     });
+
+    logsNotifier.addListener(() => _applyFilters());
   }
 
-  // Fungsi pencarian untuk dipanggil dari UI
-  void searchLogs(String query) {
-    lastQuery = query;
-    _applyFilter();
+  Future<void> _handleAutoReconnect() async {
+    final String? uri = dotenv.env['MONGODB_URI'];
+
+    if (uri != null) {
+      try {
+        await MongoService().connect(uri);
+        if (MongoService().isOnline.value && currentTeamId.isNotEmpty) {
+          await loadLogs(currentTeamId, currentUserId, userRole);
+        }
+      } catch (e) {
+        debugPrint("Gagal Auto Reconnect: $e");
+      }
+    }
   }
 
-  void _applyFilter() {
-    if (lastQuery.isEmpty) {
-      filteredLogsNotifier.value = logsNotifier.value;
-    } else {
-      filteredLogsNotifier.value = logsNotifier.value
+  // Filter untuk Pencarian dan Privasi
+  void _applyFilters() {
+    List<LogModel> visibleLogs = logsNotifier.value.where((log) {
+      bool isNotDeleted = !log.isDeleted;
+      bool hasAccess = log.authorId == currentUserId || log.isPublic == true;
+      return hasAccess && isNotDeleted;
+    }).toList();
+
+    if (lastQuery.isNotEmpty) {
+      visibleLogs = visibleLogs
           .where(
             (log) =>
-                log.title.toLowerCase().contains(lastQuery.toLowerCase()) ||
-                log.description.toLowerCase().contains(lastQuery.toLowerCase()),
+                log.title.toLowerCase().contains(lastQuery) ||
+                log.description.toLowerCase().contains(lastQuery),
           )
           .toList();
     }
+    filteredLogsNotifier.value = visibleLogs;
   }
 
-  // 1. Menambah data (Lokal)
-  Future<void> addLog(String title, String desc, String kategori) async {
-    final newLog = LogModel(
-      // Menggunakan timestamp sebagai Unique ID String pengganti ObjectId
-      id: DateTime.now().millisecondsSinceEpoch.toString(), 
-      title: title,
-      description: desc,
-      kategori: kategori,
-      date: DateTime.now(),
-    );
+  Future<void> loadLogs(String teamId, String userId, String role) async {
+    currentTeamId = teamId;
+    currentUserId = userId;
+    userRole = role;
+    isSyncingNotifier.value = true;
+
+    _updateLocalList();
 
     try {
-      final currentLogs = List<LogModel>.from(logsNotifier.value);
-      currentLogs.add(newLog);
+      final String? uri = dotenv.env['MONGODB_URI'];
+      if (uri != null) {
+        await MongoService().connect(uri);
+      }
 
-      // Update state dan simpan ke disk
-      logsNotifier.value = currentLogs;
-      await saveToDisk();
+      if (MongoService().db != null && MongoService().db!.isConnected) {
+        final pendingLogs = _logBox.values
+            .where((log) => !log.isSynced)
+            .toList();
+        for (var log in pendingLogs) {
+          if (log.isDeleted) {
+            await MongoService().deleteLog(log.id!);
+            await log.delete();
+          } else {
+            await MongoService().insertLog(log);
+            log.isSynced = true;
+            await log.save();
+          }
+        }
 
-      await LogHelper.writeLog(
-        "SUCCESS: Tambah data lokal Berhasil",
-        source: "log_controller.dart",
-      );
+        final List<Map<String, dynamic>> data = await MongoService().getLogs(
+          teamId,
+        );
+        for (var json in data) {
+          var cloudLog = LogModel.fromMap(json);
+          final local = _logBox.get(cloudLog.id);
+          if (local == null || local.isSynced) {
+            cloudLog.isSynced = true;
+            await _logBox.put(cloudLog.id, cloudLog);
+          }
+        }
+      }
     } catch (e) {
-      await LogHelper.writeLog("ERROR: Gagal menambah data - $e", level: 1);
+      debugPrint("Refresh Gagal: $e");
+      MongoService().isOnline.value = false;
+    } finally {
+      isSyncingNotifier.value = false;
+      _updateLocalList();
     }
   }
 
-  // 2. Memperbarui data (Lokal)
-  Future<void> updateLog(
-    int index,
-    String newTitle,
-    String newDesc,
-    String tempKategori,
-  ) async {
-    final currentLogs = List<LogModel>.from(logsNotifier.value);
-    final oldLog = currentLogs[index];
+  Future<void> addLog({
+    required String title,
+    required String description,
+    required String category,
+    required bool isPublic,
+  }) async {
+    var newLog = LogModel(
+      id: ObjectId().oid,
+      title: title,
+      description: description,
+      date: DateTime.now(),
+      authorId: currentUserId,
+      teamId: currentTeamId,
+      category: category,
+      isPublic: isPublic,
+      isSynced: false,
+    );
 
+    await _logBox.put(newLog.id, newLog);
+    _updateLocalList();
+
+    try {
+      await MongoService().insertLog(newLog);
+      newLog.isSynced = true;
+      await newLog.save();
+      _updateLocalList();
+    } catch (e) {
+      await LogHelper.writeLog("Tambah Offline: Disimpan di lokal", level: 1);
+    }
+  }
+
+  Future<void> updateLog({
+    required LogModel oldLog,
+    required String newTitle,
+    required String newDesc,
+    required String newCategory,
+    required bool newIsPublic,
+  }) async {
     final updatedLog = LogModel(
       id: oldLog.id,
       title: newTitle,
       description: newDesc,
-      kategori: tempKategori,
-      date: DateTime.now(), // Memperbarui waktu modifikasi
+      date: DateTime.now(),
+      authorId: oldLog.authorId,
+      teamId: oldLog.teamId,
+      category: newCategory,
+      isPublic: newIsPublic,
+      isSynced: false, 
     );
 
-    try {
-      currentLogs[index] = updatedLog;
-      logsNotifier.value = currentLogs;
-      await saveToDisk();
+    await _logBox.put(updatedLog.id, updatedLog);
+    _updateLocalList();
 
-      await LogHelper.writeLog(
-        "SUCCESS: Update lokal Berhasil",
-        source: "log_controller.dart",
-        level: 2,
-      );
+    try {
+      await MongoService().updateLog(updatedLog);
+      updatedLog.isSynced = true;
+      await _logBox.put(updatedLog.id, updatedLog);
+      _updateLocalList();
     } catch (e) {
-      await LogHelper.writeLog(
-        "ERROR: Update lokal Gagal - $e",
-        source: "log_controller.dart",
-        level: 1,
-      );
+      await LogHelper.writeLog("Update Offline: Disimpan di lokal", level: 1);
     }
   }
 
-  // 3. Menghapus data (Lokal)
   Future<void> removeLog(LogModel targetLog) async {
-    final currentLogs = List<LogModel>.from(logsNotifier.value);
+    bool isOwner = targetLog.authorId == currentUserId;
+    if (!AccessControlService.canPerform(
+      userRole,
+      AccessControlService.actionDelete,
+      isOwner: isOwner,
+    )) {
+      await LogHelper.writeLog(
+        "SECURITY BREACH: Unauthorized Delete",
+        level: 1,
+      );
+      return;
+    }
 
     try {
-      if (targetLog.id == null) throw Exception("ID Log tidak ditemukan.");
-
-      currentLogs.removeWhere((element) => element.id == targetLog.id);
-      logsNotifier.value = currentLogs;
-      await saveToDisk();
-
-      await LogHelper.writeLog(
-        "SUCCESS: Hapus lokal Berhasil",
-        source: "log_controller.dart",
-        level: 2,
-      );
+      targetLog.isDeleted = true;
+      targetLog.isSynced = false;
+      await targetLog.save();
+      _updateLocalList();
+      await MongoService().deleteLog(targetLog.id!);
+      await targetLog.delete();
     } catch (e) {
       await LogHelper.writeLog(
-        "ERROR: Hapus lokal Gagal - $e",
-        source: "log_controller.dart",
+        "Hapus Offline: Menunggu sinkronisasi",
         level: 1,
       );
     }
   }
 
-  // --- PERSISTENCE (PENYIMPANAN LOKAL) ---
-
-  // Menyimpan data ke SharedPreferences
-  Future<void> saveToDisk() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-
-      final List<Map<String, dynamic>> mappedData = logsNotifier.value.map((log) {
-        final map = log.toMap();
-        // ID sekarang sudah menjadi String, tidak perlu toHexString() lagi
-        // Ubah DateTime menjadi ISO String agar bisa masuk JSON
-        map['date'] = log.date.toIso8601String();
-        return map;
-      }).toList();
-
-      final String encodedData = jsonEncode(mappedData);
-      await prefs.setString(_storageKey, encodedData);
-
-      await LogHelper.writeLog(
-        "SUCCESS: Penyimpanan Lokal diperbarui",
-        source: "log_controller.dart",
-      );
-    } catch (e) {
-      await LogHelper.writeLog("ERROR: Gagal saveToDisk - $e", level: 1);
-    }
+  void _updateLocalList() {
+    logsNotifier.value = _logBox.values
+        .where((log) => log.teamId == currentTeamId)
+        .toList();
   }
 
-  // Membaca data murni dari SharedPreferences
-  Future<void> loadFromDisk() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final String? localData = prefs.getString(_storageKey);
-
-      if (localData != null) {
-        final List<dynamic> decoded = jsonDecode(localData);
-        logsNotifier.value = decoded.map((m) => LogModel.fromMap(m)).toList();
-      }
-
-      await LogHelper.writeLog(
-        "INFO: Data lokal berhasil dimuat",
-        level: 2,
-      );
-    } catch (e) {
-      await LogHelper.writeLog("ERROR: Gagal memuat data lokal - $e", level: 1);
-    }
+  void searchLogs(String query) {
+    lastQuery = query.toLowerCase();
+    _applyFilters();
   }
 }

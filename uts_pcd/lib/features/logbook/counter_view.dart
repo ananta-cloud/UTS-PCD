@@ -45,7 +45,7 @@ class _CounterViewState extends State<CounterView> {
             TextButton(
               onPressed: () {
                 setState(() {
-                  _controller.reset();
+                  _controller.reset(widget.user.username);
                 });
                 Navigator.of(context).pop();
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -206,14 +206,14 @@ class _CounterViewState extends State<CounterView> {
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           _actionBox(
-            onPressed: () => setState(() => _controller.decrement()),
+            onPressed: () => setState(() => _controller.decrement(widget.user.username)),
             icon: Icons.remove,
             iconColor: Colors.black,
             borderColor: Colors.red,
             fillColor: Colors.red,
           ),
           _actionBox(
-            onPressed: () => setState(() => _controller.increment()),
+            onPressed: () => setState(() => _controller.increment(widget.user.username)),
             icon: Icons.add,
             iconColor: Colors.black,
             borderColor: Colors.green,

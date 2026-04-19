@@ -7,9 +7,9 @@ class User {
 
 class LoginController {
   final List<User> _users = [
-    User(username: "admin", password: "123", role: "admin"),
-    User(username: "admin1", password: "123", role: "user"),
-    User(username: "agus", password: "123", role: "admin"),
+    User(username: "Ketua", password: "123", role: "Ketua"),
+    User(username: "Anggota", password: "123", role: "Anggota"),
+    User(username: "Asisten", password: "123", role: "Asisten"),
   ];
 
   User? login(String username, String password) {

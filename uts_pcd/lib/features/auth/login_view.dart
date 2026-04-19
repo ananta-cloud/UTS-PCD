@@ -1,50 +1,50 @@
 import 'package:flutter/material.dart';
-import 'login_controller.dart';
-// import '../logbook/counter_view.dart';
+import '../logbook/counter_view.dart';
 import '../logbook/log_view.dart';
+import 'login_controller.dart';
 
 class LoginView extends StatefulWidget {
   const LoginView({super.key});
+
   @override
   State<LoginView> createState() => _LoginViewState();
 }
 
 class _LoginViewState extends State<LoginView> {
-  final LoginController _controller = LoginController();
+  // Inisialisasi Controller
+  final LoginController _auth = LoginController();
   final TextEditingController _userController = TextEditingController();
   final TextEditingController _passController = TextEditingController();
-  bool _isObscure = true;
 
   void _handleLogin() {
-    String user = _userController.text;
-    String pass = _passController.text;
-    User? loggedInUser = _controller.login(user, pass);
+    final username = _userController.text;
+    final password = _passController.text;
 
-    if (loggedInUser != null) {
+    // Memanggil logic login
+    final user = _auth.login(username, password);
+
+    if (user != null) {
+      // Jika berhasil, bungkus data ke map (sesuai kebutuhan LogView kamu sebelumnya)
+      final currentUser = {
+        'uid': user.username.toLowerCase(),
+        'username': user.username,
+        'role': user.role,
+        'teamId': 'MEKTRA_KLP_01',
+      };
+
       Navigator.pushReplacement(
         context,
+        // MaterialPageRoute(builder: (context) => LogView(currentUser: currentUser)),
         MaterialPageRoute(
-          // builder: (context) => CounterView(user: loggedInUser),
-          builder: (context) => LogView(user: loggedInUser),
+          builder: (context) => LogView(currentUser: currentUser),
         ),
       );
     } else {
+      // Jika gagal, tampilkan pesan
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: const [
-              Icon(Icons.error_outline, color: Colors.white),
-              SizedBox(width: 10),
-              Expanded(child: Text("Login Gagal! Cek kembali data Anda.")),
-            ],
-          ),
-          backgroundColor: Colors.redAccent,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-          margin: const EdgeInsets.all(10),
-          duration: const Duration(seconds: 3),
+        const SnackBar(
+          content: Text("Username atau Password salah!"),
+          backgroundColor: Colors.red,
         ),
       );
     }
@@ -53,38 +53,44 @@ class _LoginViewState extends State<LoginView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Login Gatekeeper")),
+      appBar: AppBar(title: const Text("Logbook Login")),
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(20.0),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             TextField(
               controller: _userController,
-              decoration: const InputDecoration(labelText: "Username"),
-            ),
-            TextField(
-              controller: _passController,
-              obscureText: _isObscure,
-              keyboardType: TextInputType.visiblePassword,
-              textInputAction: TextInputAction.done,
-              decoration: InputDecoration(
-                labelText: "Password",
-                hintText: "Masukkan Password",
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  icon: Icon(
-                    _isObscure ? Icons.visibility : Icons.visibility_off,
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      _isObscure = !_isObscure;
-                    });
-                  },
-                ),
+              decoration: const InputDecoration(
+                labelText: "Username",
+                prefixIcon: Icon(Icons.person),
+                border: OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 20),
-            ElevatedButton(onPressed: _handleLogin, child: const Text("Login")),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _passController,
+              obscureText: true, // Menyembunyikan password
+              decoration: const InputDecoration(
+                labelText: "Password",
+                prefixIcon: Icon(Icons.lock),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: _handleLogin,
+                style: ElevatedButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text("MASUK"),
+              ),
+            ),
           ],
         ),
       ),
