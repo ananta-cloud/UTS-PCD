@@ -32,6 +32,7 @@ dependencies:
   connectivity_plus: ^5.0.2
   uuid: ^4.3.3
   shared_preferences: ^2.2.2
+```
 
 **Langkah 3: Sinkronisasi Package**
 ```
