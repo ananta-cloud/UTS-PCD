@@ -1,18 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+// import 'package:flutter_dotenv/flutter_dotenv.dart';
 // import 'logbook/counter_view.dart';
 import 'features/onboarding/onboarding_view.dart';
 
 void main() async {
-  // Wajib untuk operasi asinkron sebelum runApp
-  WidgetsFlutterBinding.ensureInitialized();
-  // Load ENV
-  await dotenv.load(fileName: ".env");
+  // // Wajib untuk operasi asinkron sebelum runApp
+  // WidgetsFlutterBinding.ensureInitialized();
+  // // Load ENV
+  // await dotenv.load(fileName: ".env");
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+  
 
   // This widget is the root of your application.
   @override

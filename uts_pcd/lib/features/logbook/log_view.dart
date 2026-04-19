@@ -1,5 +1,9 @@
-import  'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+
+// Pastikan path import ini sesuai dengan lokasi file image_processing_view.dart Anda
+import '../image_processing/image_processing_view.dart'; 
+
 import 'log_controller.dart';
 import '../onboarding/onboarding_view.dart';
 import '../models/log_model.dart';
@@ -7,8 +11,6 @@ import '../auth/login_controller.dart';
 import '../widgets/search_log.dart';
 import '../widgets/empty_log.dart';
 import '../../helpers/log_helper.dart';
-import '../../services/mongo_service.dart';
-import 'package:intl/intl.dart';
 
 class LogView extends StatefulWidget {
   final User user;
@@ -21,16 +23,17 @@ class LogView extends StatefulWidget {
 
 class _LogViewState extends State<LogView> {
   late LogController _controller;
-  late Future<List<LogModel>> _logsFuture;
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _contentController = TextEditingController();
-  bool _isLoading = false;
+  
+  bool _isLoading = true;
+  int _currentIndex = 0;
 
   String _formatTimestamp(DateTime date) {
-  final now = DateTime.now();
-  final difference = now.difference(date);
+    final now = DateTime.now();
+    final difference = now.difference(date);
 
-  if (difference.inMinutes < 1) {
+    if (difference.inMinutes < 1) {
       return "Baru saja";
     } else if (difference.inMinutes < 60) {
       return "${difference.inMinutes} menit yang lalu";
@@ -45,44 +48,24 @@ class _LogViewState extends State<LogView> {
   void initState() {
     super.initState();
     _controller = LogController();
-    Future.microtask(() => _initDatabase());
-    _refreshData();
+    _initLocalDatabase();
   }
 
-  void _refreshData() {
-    setState(() {
-      _logsFuture = MongoService().getLogs();
-    });
-  }
-
-  Future<void> _initDatabase() async {
+  // Fungsi inisialisasi yang hanya berfokus pada penyimpanan lokal
+  Future<void> _initLocalDatabase() async {
     setState(() => _isLoading = true);
     try {
-      await LogHelper.writeLog("UI: Memulai inisialisasi...", source: "log_view.dart");
+      await LogHelper.writeLog("UI: Memulai inisialisasi penyimpanan offline...", source: "log_view.dart");
 
-      // 1. Ambil URI dari dotenv
-      final String? mongoUri = dotenv.env['MONGODB_URI'];
-      
-      if (mongoUri == null) {
-        throw Exception("MONGODB_URI tidak ditemukan di .env");
-      }
-
-      // 2. Kirim mongoUri ke fungsi connect()
-      // PERBAIKAN: Sekarang connect() menerima 1 argumen
-      await MongoService().connect(mongoUri).timeout(
-        const Duration(seconds: 15),
-        onTimeout: () => throw Exception("Koneksi Cloud Timeout."),
-      );
-
-      await LogHelper.writeLog("UI: Koneksi Berhasil.", source: "log_view.dart");
-
-      // 3. Memuat data
+      // Memuat data secara offline dari disk lokal
       await _controller.loadFromDisk();
+      
+      await LogHelper.writeLog("UI: Data offline berhasil dimuat.", source: "log_view.dart");
     } catch (e) {
-      await LogHelper.writeLog("UI: Error - $e", source: "log_view.dart", level: 1);
+      await LogHelper.writeLog("UI: Error memuat data lokal - $e", source: "log_view.dart", level: 1);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Masalah: $e"), backgroundColor: Colors.red),
+          SnackBar(content: Text("Masalah saat membaca data lokal: $e"), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -90,7 +73,6 @@ class _LogViewState extends State<LogView> {
     }
   }
 
-  // DIALOG EDIT - PERBAIKAN: Menggunakan ID/Objek, bukan Index
   void _showEditLogDialog(LogModel log) {
     _titleController.text = log.title;
     _contentController.text = log.description;
@@ -119,7 +101,6 @@ class _LogViewState extends State<LogView> {
             TextButton(onPressed: () => Navigator.pop(context), child: const Text("Batal")),
             ElevatedButton(
               onPressed: () async {
-                // PERBAIKAN: Mencari index terbaru dari list controller agar akurat
                 int currentIndex = _controller.logsNotifier.value.indexOf(log);
                 
                 await _controller.updateLog(
@@ -139,7 +120,6 @@ class _LogViewState extends State<LogView> {
     );
   }
 
-  // DIALOG TAMBAH (Sudah benar)
   void _showAddLogDialog() {
     _titleController.clear();
     _contentController.clear();
@@ -189,153 +169,120 @@ class _LogViewState extends State<LogView> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("LogBook: ${widget.user.username}"),
+        title: Text(
+          _currentIndex == 0 
+            ? "LogBook (Offline): ${widget.user.username}" 
+            : "Vision PCD: ${widget.user.username}"
+        ),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
-          IconButton(icon: const Icon(Icons.logout), onPressed: _showLogoutConfirmation),
-        ],
-      ),
-      body: Column(
-        children: [
-          SearchBarWidget(onSearch: (value) => _controller.searchLogs(value)),
-          Expanded(
-          child: FutureBuilder<List<LogModel>>(
-            future: _logsFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              
-              if (snapshot.hasError) {
-                return Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20.0),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Image.asset(
-                        'lib/assets/image/no-connection.png',
-                        width: 250,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) => 
-                            const Icon(Icons.wifi_off_rounded, size: 120, color: Colors.grey),
-                      ),
-                      const SizedBox(height: 30),
-                      
-                      // Judul Error
-                      const Text(
-                        "Koneksi Terputus",
-                        style: TextStyle(
-                          fontSize: 20, 
-                          fontWeight: FontWeight.bold, 
-                          color: Colors.redAccent,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      
-                      // Deskripsi
-                      const Text(
-                        "Aplikasi tidak dapat terhubung ke MongoDB Atlas.\nPastikan perangkat Anda terhubung ke internet yang stabil.",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 14, color: Colors.blueGrey, height: 1.5),
-                      ),
-                      const SizedBox(height: 30),
-                      
-                      // Tombol Coba Lagi
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          _refreshData(); 
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Theme.of(context).primaryColor,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        icon: const Icon(Icons.refresh),
-                        label: const Text(
-                          "Coba Lagi",
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
-                      )
-                    ],
-                  ),
-                );
-              }
-
-              // 3. Menangani Data Kosong
-              if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                return const EmptyLog(isSearchMode: false);
-              }
-
-              final logs = snapshot.data!;
-
-              return RefreshIndicator(
-              onRefresh: () async {
-                _refreshData();
-                await _logsFuture; 
-              },
-              child: ListView.builder(
-              itemCount: logs.length,
-              itemBuilder: (context, index) {
-              final log = logs[index];
-                    return Dismissible(
-                      key: Key(log.date.toString()), // Gunakan ID yang unik
-                      direction: DismissDirection.endToStart,
-                      background: _buildDeleteBackground(),
-                      onDismissed: (direction) => _controller.removeLog(log), 
-                      child: Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        child: ListTile(
-                          leading: VerticalDivider(color: log.categoryColor, thickness: 6),
-                          title: Text(log.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start, 
-                            mainAxisSize: MainAxisSize.min, 
-                            children: [
-                              Text(log.description),
-                              const SizedBox(height: 4), 
-                              Text(
-                                DateFormat('dd MMM yyyy, HH:mm').format(log.date),
-                                style: const TextStyle(
-                                  fontSize: 12, 
-                                  color: Colors.blueGrey, 
-                                  fontStyle: FontStyle.italic
-                                ),
-                              ),
-                            ],
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.edit, color: Colors.blue),
-                                onPressed: () => _showEditLogDialog(log),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete, color: Colors.red),
-                                onPressed: () => _controller.removeLog(log), 
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                )
-                );
-              },
-            ),
+          IconButton(
+            icon: const Icon(Icons.logout), 
+            onPressed: _showLogoutConfirmation
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
+      
+      // Navigasi isi halaman berdasarkan tab
+      body: _currentIndex == 0 ? _buildLogbookBody() : const ImageProcessingView(),
+      
+      floatingActionButton: _currentIndex == 0 ? FloatingActionButton(
         onPressed: _showAddLogDialog,
         child: const Icon(Icons.add),
+      ) : null,
+      
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.book),
+            label: 'Logbook',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.image_search),
+            label: 'PCD',
+          ),
+        ],
       ),
+    );
+  }
+
+  // Tampilan halaman catatan
+  Widget _buildLogbookBody() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return Column(
+      children: [
+        SearchBarWidget(onSearch: (value) => _controller.searchLogs(value)),
+        Expanded(
+          // Menggunakan ValueListenableBuilder untuk reaktivitas secara real-time
+          // terhadap perubahan data pada penyimpanan lokal.
+          child: ValueListenableBuilder<List<LogModel>>(
+            valueListenable: _controller.logsNotifier,
+            builder: (context, logs, child) {
+              if (logs.isEmpty) {
+                return const EmptyLog(isSearchMode: false);
+              }
+
+              return ListView.builder(
+                itemCount: logs.length,
+                itemBuilder: (context, index) {
+                  final log = logs[index];
+                  return Dismissible(
+                    key: Key(log.date.toString()),
+                    direction: DismissDirection.endToStart,
+                    background: _buildDeleteBackground(),
+                    onDismissed: (direction) => _controller.removeLog(log), 
+                    child: Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      child: ListTile(
+                        leading: VerticalDivider(color: log.categoryColor, thickness: 6),
+                        title: Text(log.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start, 
+                          mainAxisSize: MainAxisSize.min, 
+                          children: [
+                            Text(log.description),
+                            const SizedBox(height: 4), 
+                            Text(
+                              _formatTimestamp(log.date),
+                              style: const TextStyle(
+                                fontSize: 12, 
+                                color: Colors.blueGrey, 
+                                fontStyle: FontStyle.italic
+                              ),
+                            ),
+                          ],
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.blue),
+                              onPressed: () => _showEditLogDialog(log),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              onPressed: () => _controller.removeLog(log), 
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 

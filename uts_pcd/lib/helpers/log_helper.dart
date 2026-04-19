@@ -1,21 +1,20 @@
 import 'dart:developer' as dev;
 import 'dart:io';
-import 'package:intl/intl.dart'; // Tetap kita gunakan untuk presisi waktu
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:path_provider/path_provider.dart'; // Untuk akses file di Flutter
+import 'package:intl/intl.dart'; 
+import 'package:path_provider/path_provider.dart'; 
 
 class LogHelper {
+  static const int configLevel = 2;
+  static const List<String> muteList = []; 
+
   static Future<void> writeLog(
     String message, {
-    String source = "Unknown", // Menandakan file/proses asal
+    String source = "Unknown", 
     int level = 2,
   }) async {
-    // 1. Filter Konfigurasi (ENV)
-    final int configLevel = int.tryParse(dotenv.env['LOG_LEVEL'] ?? '2') ?? 2;
-    final String muteList = dotenv.env['LOG_MUTE'] ?? '';
-
+    // 1. Filter Konfigurasi (Menggunakan konstanta lokal)
     if (level > configLevel) return;
-    if (muteList.split(',').contains(source)) return;
+    if (muteList.contains(source)) return;
 
     try {
       // 2. Format Waktu untuk Konsol
@@ -27,8 +26,7 @@ class LogHelper {
       // 3. Output ke VS Code Debug Console (Non-blocking)
       dev.log(message, name: source, time: DateTime.now(), level: level * 100);
 
-      // 4. Output ke Terminal (Agar Bapak bisa lihat di PC saat flutter run)
-      // Format: [14:30:05] [INFO] [log_view.dart] -> Database Terhubung
+      // 4. Output ke Terminal
       print('$color[$timestamp][$label][$source] -> $message\x1B[0m');
       await _writeToFile(logLine);
     } catch (e) {
@@ -37,7 +35,6 @@ class LogHelper {
   }
 
   static Future<void> _writeToFile(String logLine) async {
-    // Memerlukan package path_provider untuk flutter
     final directory = await getApplicationDocumentsDirectory();
     final logDir = Directory('${directory.path}/logs');
 

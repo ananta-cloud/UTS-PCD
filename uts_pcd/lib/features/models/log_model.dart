@@ -2,14 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:mongo_dart/mongo_dart.dart';
 
 class LogModel {
-  final ObjectId? id;
+  // final ObjectId? id;
+  final String id;
   final String title;
   final String description;
   final String kategori;
   final DateTime date;
 
   LogModel({
-    this.id,
+    required this.id,
     required this.title,
     required this.date,
     required this.description,

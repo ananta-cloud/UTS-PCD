@@ -20,6 +20,7 @@ version: 1.0.0+1
 
 environment:
   sdk: ^3.10.8
+  
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -30,10 +31,12 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_dotenv: ^6.0.0   # or latest version
+  # flutter_dotenv: ^6.0.0   # or latest version
   mongo_dart: 0.10.0
   mongo_dart_query: 5.0.3
   intl: ^0.20.2
+  image_picker: ^1.0.7
+  image: ^4.1.7
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -68,7 +71,6 @@ flutter:
   assets:
     - lib/assets/image/
     - lib/assets/gif/
-    - .env
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

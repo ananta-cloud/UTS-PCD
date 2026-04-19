@@ -1,29 +1,28 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:mongo_dart/mongo_dart.dart';
-import 'package:logbook_app_001/features/models/log_model.dart';
-import 'package:logbook_app_001/services/mongo_service.dart';
-import 'package:logbook_app_001/helpers/log_helper.dart';
+
+// Hapus import mongo_dart dan mongo_service
+import '../models/log_model.dart';
+import '../../helpers/log_helper.dart';
 
 class LogController {
   // Notifier utama untuk data asli
   final ValueNotifier<List<LogModel>> logsNotifier =
       ValueNotifier<List<LogModel>>([]);
 
-  // PERBAIKAN: Inisialisasi notifier untuk pencarian agar tidak null
+  // Notifier untuk pencarian agar tidak null
   final ValueNotifier<List<LogModel>> filteredLogsNotifier =
       ValueNotifier<List<LogModel>>([]);
 
   String lastQuery = "";
 
-  // PERBAIKAN: Tambahkan kunci storage yang hilang
+  // Kunci storage untuk SharedPreferences
   static const String _storageKey = 'user_logs_data';
 
   List<LogModel> get logs => logsNotifier.value;
 
   LogController() {
-    loadFromDisk();
     // Setiap kali logsNotifier berubah, filter otomatis dijalankan
     logsNotifier.addListener(() {
       _applyFilter();
@@ -50,10 +49,11 @@ class LogController {
     }
   }
 
-  // 1. Menambah data
+  // 1. Menambah data (Lokal)
   Future<void> addLog(String title, String desc, String kategori) async {
     final newLog = LogModel(
-      id: ObjectId(),
+      // Menggunakan timestamp sebagai Unique ID String pengganti ObjectId
+      id: DateTime.now().millisecondsSinceEpoch.toString(), 
       title: title,
       description: desc,
       kategori: kategori,
@@ -61,25 +61,23 @@ class LogController {
     );
 
     try {
-      await MongoService().insertLog(newLog);
-
       final currentLogs = List<LogModel>.from(logsNotifier.value);
       currentLogs.add(newLog);
 
-      // PERBAIKAN: Update state dan simpan ke disk di dalam blok try
+      // Update state dan simpan ke disk
       logsNotifier.value = currentLogs;
       await saveToDisk();
 
       await LogHelper.writeLog(
-        "SUCCESS: Tambah data Berhasil",
+        "SUCCESS: Tambah data lokal Berhasil",
         source: "log_controller.dart",
       );
     } catch (e) {
-      await LogHelper.writeLog("ERROR: Gagal sinkronisasi Add - $e", level: 1);
+      await LogHelper.writeLog("ERROR: Gagal menambah data - $e", level: 1);
     }
   }
 
-  // 2. Memperbarui data
+  // 2. Memperbarui data (Lokal)
   Future<void> updateLog(
     int index,
     String newTitle,
@@ -93,73 +91,66 @@ class LogController {
       id: oldLog.id,
       title: newTitle,
       description: newDesc,
-      kategori: tempKategori, // Gunakan kategori baru dari dialog
-      date: DateTime.now(),
+      kategori: tempKategori,
+      date: DateTime.now(), // Memperbarui waktu modifikasi
     );
 
     try {
-      await MongoService().updateLog(updatedLog);
-
       currentLogs[index] = updatedLog;
       logsNotifier.value = currentLogs;
       await saveToDisk();
 
       await LogHelper.writeLog(
-        "SUCCESS: Update Berhasil",
+        "SUCCESS: Update lokal Berhasil",
         source: "log_controller.dart",
         level: 2,
       );
     } catch (e) {
       await LogHelper.writeLog(
-        "ERROR: Update Gagal - $e",
+        "ERROR: Update lokal Gagal - $e",
         source: "log_controller.dart",
         level: 1,
       );
     }
   }
 
-  // 3. Menghapus data (Sekarang menggunakan objek Log agar lebih aman)
+  // 3. Menghapus data (Lokal)
   Future<void> removeLog(LogModel targetLog) async {
     final currentLogs = List<LogModel>.from(logsNotifier.value);
 
     try {
       if (targetLog.id == null) throw Exception("ID Log tidak ditemukan.");
 
-      await MongoService().deleteLog(targetLog.id!);
-
       currentLogs.removeWhere((element) => element.id == targetLog.id);
       logsNotifier.value = currentLogs;
       await saveToDisk();
 
       await LogHelper.writeLog(
-        "SUCCESS: Hapus Berhasil",
+        "SUCCESS: Hapus lokal Berhasil",
         source: "log_controller.dart",
         level: 2,
       );
     } catch (e) {
       await LogHelper.writeLog(
-        "ERROR: Hapus Gagal - $e",
+        "ERROR: Hapus lokal Gagal - $e",
         source: "log_controller.dart",
         level: 1,
       );
     }
   }
 
-  // --- PERSISTENCE ---
+  // --- PERSISTENCE (PENYIMPANAN LOKAL) ---
 
+  // Menyimpan data ke SharedPreferences
   Future<void> saveToDisk() async {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      // PERBAIKAN: Sebelum jsonEncode, pastikan semua data menjadi tipe dasar (String/Int)
-      final List<Map<String, dynamic>> mappedData = logsNotifier.value.map((
-        log,
-      ) {
+      final List<Map<String, dynamic>> mappedData = logsNotifier.value.map((log) {
         final map = log.toMap();
-        // Ubah ObjectId menjadi String Hex agar bisa masuk JSON
-        map['_id'] = (map['_id'] as ObjectId).toHexString();
+        // ID sekarang sudah menjadi String, tidak perlu toHexString() lagi
         // Ubah DateTime menjadi ISO String agar bisa masuk JSON
-        map['date'] = (map['date'] as DateTime).toIso8601String();
+        map['date'] = log.date.toIso8601String();
         return map;
       }).toList();
 
@@ -167,7 +158,7 @@ class LogController {
       await prefs.setString(_storageKey, encodedData);
 
       await LogHelper.writeLog(
-        "SUCCESS: Backup Lokal diperbarui",
+        "SUCCESS: Penyimpanan Lokal diperbarui",
         source: "log_controller.dart",
       );
     } catch (e) {
@@ -175,30 +166,23 @@ class LogController {
     }
   }
 
-  // 2. Fungsi Load Data (Cloud & Lokal)
+  // Membaca data murni dari SharedPreferences
   Future<void> loadFromDisk() async {
     try {
-      // Coba ambil data terbaru dari Cloud
-      final cloudData = await MongoService().getLogs();
-      logsNotifier.value = cloudData;
-
-      // Update cache lokal setiap kali berhasil ambil dari Cloud
-      await saveToDisk();
-    } catch (e) {
-      // Jika Offline/Gagal Cloud, ambil dari SharedPreferences
       final prefs = await SharedPreferences.getInstance();
       final String? localData = prefs.getString(_storageKey);
 
       if (localData != null) {
         final List<dynamic> decoded = jsonDecode(localData);
-        // factory LogModel.fromMap Anda sudah bisa menangani konversi String ke ObjectId
         logsNotifier.value = decoded.map((m) => LogModel.fromMap(m)).toList();
       }
 
       await LogHelper.writeLog(
-        "INFO: Berjalan dalam mode Offline/Local",
+        "INFO: Data lokal berhasil dimuat",
         level: 2,
       );
+    } catch (e) {
+      await LogHelper.writeLog("ERROR: Gagal memuat data lokal - $e", level: 1);
     }
   }
 }
